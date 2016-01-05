@@ -1,0 +1,220 @@
+##########
+# CMDA-Intermediate Machine Learning
+# Project- Global Slavery Data with Regression and Neural Nets
+##########
+
+local({r <- getOption("repos"); 
+       r["CRAN"] <- "http://cran.r-project.org"; options(repos=r)})
+
+setwd("/Users/Dani/Documents/CMDAII")
+
+#Question:
+# What factors have the greatest effect on number of people enslaved within a country
+# Number enslaved(NPMS) = response(y)
+
+####Load Data into Environment
+md_S=read.csv("mds_new1.csv", header=TRUE)
+View(md_S)
+
+#Examine that my data was imported well
+head(md_S) #first 6 rows; it works,woo!
+length(names(md_S))
+names(md_S)
+
+detach(md_S)
+
+#attach my data to be able to use variables directly
+#do not forget to detach at the end
+attach(md_S)
+
+###Data Management and Scaling
+#Some of my variables initially read as factors or integers
+#I wanted to change them all(except county) to numeric to 
+#scale properly before analyzing
+
+#Variable Classes
+#Factor
+class(Country)
+#Integer
+class(Estimated.population.in.modern.slavery..n.)
+class(Population)
+
+#Change Estimated Population in Modern Slavery to NPMS
+names(md_S)[8]<-"NPMS"
+
+#Numeric
+class(Discrimination)
+class(Slavery.policy)
+class(State.stability)
+class(Development)
+class(Human.rights)
+#All variables should be changed to numeric, except 
+#County.Name which should be a character
+Country = as.character(Country)
+View(Country)
+
+#Drop country column from dataset
+md_S=md_S[,-(1:2)]
+View(md_S)
+
+#Variables still showing up as integers/factors
+str(md_S)
+md_S = data.frame(lapply(md_S, function(x) as.numeric(as.character(x))))
+View(md_S)
+
+
+#Normalize data about mean = 0
+mds=scale(md_S)
+summary(mds)
+View(mds)
+
+#Set as a dataframe
+mds=as.data.frame(mds)
+
+#Split into training and test sets
+N = dim(mds)[1]
+NTrain = round(0.7*N)
+temp = sample(1:N, NTrain, replace=FALSE)
+mdsTrain = mds[temp,]
+mdsTest = mds[-temp,]
+
+  
+### Analysis 1: Linear Regression
+#Build Initial full model (all regressors in the model)
+base_model = lm(NPMS ~ Slavery.policy+ Human.rights+
+                  Development+ State.stability+
+                  Discrimination+ Population, data=mds)
+
+#Check Diagnostics
+summary.lm(base_model)
+par(mfrow=c(2,2))
+yhat<-base_model$fit
+t<-rstudent(base_model)
+qqnorm(t)
+plot(yhat,t)
+
+plot(mds$Slavery.policy,t)
+plot(mds$)
+
+plot(base_model)
+
+#Build Second model based on the T-statistics of the first
+#model
+
+mod2=lm(NPMS~, data=mds)
+b_c=boxcox(base_model)
+
+#Transformation; BoxCox Method lambda=1/2
+base_modelt = lm(NPMS^(1/2) ~ Slavery.policy+ Human.rights+
+                  Development+ State.stability+
+                  Discrimination+ Population, data=mds)
+summary(base_modelt)
+
+
+bst_model=lm(NPMS~Slavery.policy+
+               State.stability+
+               Discrimination+ Population, data=mds)
+summary(bst_model)
+
+#Examine diagnostic plots
+#plot1; regular residuals vs fitted values
+plot(fitted(base_model),residuals(base_model))
+#plot2; externally studentized residuals vs fitted values
+plot(fitted(base_model),rstudent(base_model),main="Residuals v. Fitted Values",
+     xlab="Fitted Values",ylab="Studentized Residuals")
+#plot3; qq plot of externally studentized residuals
+#heavy tailed 
+qqnorm(rstudent(base_model))
+
+par(mfrow=c(1,2))
+plot(fitted(base_model),residuals(base_model))
+plot(fitted(base_model),rstudent(base_model))
+qqnorm(rstudent(base_model))
+
+
+
+
+#8 Check multicollinearity; look at least at VIFs
+#use the vif function in faraway package
+install.packages("faraway") #you only have to run this once
+library(faraway)
+x = model.matrix(base_model)
+y=model.matrix(base_modelt)
+faraway::vif(x) 
+faraway::vif(y)
+#All Variance inflation factors are lower than 5 and we can conclude that there
+#is low probability for multicollinearity (none of the factors are highly 
+#correlated with any of the other factors)
+
+
+#Run variable selection: stepwise, forward, backward
+#First model with no regressors
+null = lm(mds$NPMS ~ 1)
+summary(null)
+
+#Stepwise Regression
+step(base_model,scope = list(upper=base_model), direction="both")
+
+#Backward elimination (highest p-val first)
+step(base_model, direction = "backward")
+
+#Forward selection - lowest p-val first
+step(null,scope = list(lower=null,upper=base_model), direction = "forward")
+
+#Comment on what is the resulting model selected by each of stepwise/forward/backward
+
+#Perform all possible regressions (or best subsets regressions)
+install.packages("leaps") #you only have to install the package once
+library(leaps)
+reg_model = regsubsets(NPMS ~ Slavery.policy+ Human.rights+
+                  Development+ State.stability+
+                  Discrimination+ Population, data=mds)
+full_model=summary(reg_model) #prints best model of each size (1 regressor, 2 regressors etc.)
+full_model$rsq
+full_model$rss
+full_model$adjr2
+full_model$obj
+
+
+### Analysis 2: Neural Networks
+install.packages("neuralnet")
+library(neuralnet) 
+
+mds_neuralnet1<- neuralnet(NPMS ~ Slavery.policy+ Human.rights+
+                             Development+ State.stability+
+                             Discrimination+ Population, data=mdsTrain)
+
+plot(mds_neuralnet1)
+mds_neuralnet1$result.matrix
+#Find a linear relationship by finding the correlation between
+#predicted concrete strength and the true value
+#correlation close to 1 indicates a strong relationship
+
+model_results= compute(mds_neuralnet1, mdsTest[1:6])
+predicted_strength= model_results$net.result
+
+cor(predicted_strength, mdsTest$NPMS)
+
+#New net with 5 nodes, error is reduced
+mds_neuralnet2<- neuralnet(NPMS ~ Slavery.policy+ Human.rights+
+                             Development+ State.stability+
+                             Discrimination+ Population, hidden=5, data=mdsTrain)
+
+plot(mds_neuralnet2)
+model_results2= compute(mds_neuralnet2, mdsTest[1:6])
+predicted_strength2 = model_results2$net.result
+cor(predicted_strength2, mdsTest$NPMS)
+
+#New net with 8 nodes, error is reduced
+mds_neuralnet3<- neuralnet(NPMS ~ Slavery.policy+ Human.rights+
+                             Development+ State.stability+
+                             Discrimination+ Population, hidden=8, data=mdsTrain)
+plot(mds_neuralnet3)
+model_results3= compute(mds_neuralnet3, mdsTest[1:6])
+predicted_strength3 = model_results3$net.result
+cor(predicted_strength3, mdsTest$NPMS)
+
+
+detach(md_S)
+
+
